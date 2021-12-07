@@ -144,6 +144,10 @@ public class MainActivity extends ListActivity {
         if (!cm.isContentCreated(this)) {
             ContentManager.getInstance().createAll(this);
         }
+
+        Intent intent = new Intent();
+        intent.setClass(this, TextureFromCameraActivity.class);
+        startActivity(intent);
     }
 
     /**

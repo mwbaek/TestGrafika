@@ -16,6 +16,7 @@
 
 package com.android.grafika;
 
+import android.content.res.AssetFileDescriptor;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -23,6 +24,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
 import android.view.Surface;
+import android.widget.ImageView;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -45,7 +47,8 @@ public class MoviePlayer {
     // May be set/read by different threads.
     private volatile boolean mIsStopRequested;
 
-    private File mSourceFile;
+    //private File mSourceFile;
+    private AssetFileDescriptor mSourceFile;
     private Surface mOutputSurface;
     FrameCallback mFrameCallback;
     private boolean mLoop;
@@ -88,6 +91,47 @@ public class MoviePlayer {
         void loopReset();
     }
 
+    /**
+     * Constructs a MoviePlayer.
+     *
+     * @param sourceFile The video file to open.
+     * @param outputSurface The Surface where frames will be sent.
+     * @param frameCallback Callback object, used to pace output.
+     * @throws IOException
+     */
+    public MoviePlayer(AssetFileDescriptor sourceFile, Surface outputSurface, FrameCallback frameCallback)
+            throws IOException {
+        mSourceFile = sourceFile;
+        mOutputSurface = outputSurface;
+        mFrameCallback = frameCallback;
+
+        // Pop the file open and pull out the video characteristics.
+        // TODO: consider leaving the extractor open.  Should be able to just seek back to
+        //       the start after each iteration of play.  Need to rearrange the API a bit --
+        //       currently play() is taking an all-in-one open+work+release approach.
+        MediaExtractor extractor = null;
+        try {
+            extractor = new MediaExtractor();
+            extractor.setDataSource(mSourceFile);
+            int trackIndex = selectTrack(extractor);
+            if (trackIndex < 0) {
+                throw new RuntimeException("No video track found in " + mSourceFile);
+            }
+            extractor.selectTrack(trackIndex);
+
+            MediaFormat format = extractor.getTrackFormat(trackIndex);
+            mVideoWidth = format.getInteger(MediaFormat.KEY_WIDTH);
+            mVideoHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
+            if (VERBOSE) {
+                Log.d(TAG, "Video size is " + mVideoWidth + "x" + mVideoHeight);
+            }
+        } finally {
+            if (extractor != null) {
+                extractor.release();
+            }
+        }
+    }
+
 
     /**
      * Constructs a MoviePlayer.
@@ -99,7 +143,7 @@ public class MoviePlayer {
      */
     public MoviePlayer(File sourceFile, Surface outputSurface, FrameCallback frameCallback)
             throws IOException {
-        mSourceFile = sourceFile;
+        //mSourceFile = sourceFile;
         mOutputSurface = outputSurface;
         mFrameCallback = frameCallback;
 
@@ -172,13 +216,13 @@ public class MoviePlayer {
 
         // The MediaExtractor error messages aren't very useful.  Check to see if the input
         // file exists so we can throw a better one if it's not there.
-        if (!mSourceFile.canRead()) {
-            throw new FileNotFoundException("Unable to read " + mSourceFile);
-        }
+//        if (!mSourceFile.canRead()) {
+//            throw new FileNotFoundException("Unable to read " + mSourceFile);
+//        }
 
         try {
             extractor = new MediaExtractor();
-            extractor.setDataSource(mSourceFile.toString());
+            extractor.setDataSource(mSourceFile);
             int trackIndex = selectTrack(extractor);
             if (trackIndex < 0) {
                 throw new RuntimeException("No video track found in " + mSourceFile);

@@ -31,7 +31,6 @@ import android.widget.CheckBox;
 import android.widget.Spinner;
 import android.widget.AdapterView.OnItemSelectedListener;
 
-import java.io.File;
 import java.io.IOException;
 
 /**
@@ -172,7 +171,7 @@ public class PlayMovieActivity extends Activity implements OnItemSelectedListene
             MoviePlayer player = null;
             try {
                  player = new MoviePlayer(
-                        new File(getFilesDir(), mMovieFiles[mSelectedMovie]), surface, callback);
+                         getResources().openRawResourceFd(R.raw.sample), surface, callback);
             } catch (IOException ioe) {
                 Log.e(TAG, "Unable to play movie", ioe);
                 surface.release();
