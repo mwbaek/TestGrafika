@@ -445,26 +445,19 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private int mCameraPreviewWidth, mCameraPreviewHeight;
 
         private EglCore mEglCore;
-        private WindowSurface mWindowSurface;
-        private int mWindowSurfaceWidth;
-        private int mWindowSurfaceHeight;
-
-        // Receives the output from the camera preview.
-        private SurfaceTexture mCameraTexture;
 
         // Orthographic projection matrix.
         private float[] mDisplayProjectionMatrix = new float[16];
 
-        private Texture2dProgram mTexProgram;
-        private final ScaledDrawable2d mRectDrawable =
-                new ScaledDrawable2d(Drawable2d.Prefab.RECTANGLE);
-        private final Sprite2d mRect = new Sprite2d(mRectDrawable);
+        // Receives the output from the camera preview.
+        private VideoInput mCameraVideoInput = new VideoInput();
 
         private int mZoomPercent = DEFAULT_ZOOM_PERCENT;
         private int mSizePercent = DEFAULT_SIZE_PERCENT;
         private int mRotatePercent = DEFAULT_ROTATE_PERCENT;
         private float mPosX, mPosY;
 
+        private VideoOutput mViewerOutput = new VideoOutput();
 
         /**
          * Constructor.  Pass in the MainHandler, which allows us to send stuff back to the
@@ -539,15 +532,14 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          */
         private void surfaceAvailable(SurfaceHolder holder, boolean newSurface) {
             Surface surface = holder.getSurface();
-            mWindowSurface = new WindowSurface(mEglCore, surface, false);
-            mWindowSurface.makeCurrent();
+            mViewerOutput.mWindowSurface = new WindowSurface(mEglCore, surface, false);
+            mViewerOutput.mWindowSurface.makeCurrent();
 
             // Create and configure the SurfaceTexture, which will receive frames from the
             // camera.  We set the textured rect's program to render from it.
-            mTexProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
-            int textureId = mTexProgram.createTextureObject();
-            mCameraTexture = new SurfaceTexture(textureId);
-            mRect.setTexture(textureId);
+            mCameraVideoInput.mTexProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
+            mCameraVideoInput.textureId = mCameraVideoInput.mTexProgram.createTextureObject();
+            mCameraVideoInput.surfaceTexture = new SurfaceTexture(mCameraVideoInput.textureId);
 
             if (!newSurface) {
                 // This Surface was established on a previous run, so no surfaceChanged()
@@ -555,12 +547,12 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
                 //
                 // We could also just call this unconditionally, and perhaps do an unnecessary
                 // bit of reallocating if a surface-changed message arrives.
-                mWindowSurfaceWidth = mWindowSurface.getWidth();
-                mWindowSurfaceHeight = mWindowSurface.getHeight();
+                mViewerOutput.mWindowSurfaceWidth = mViewerOutput.mWindowSurface.getWidth();
+                mViewerOutput.mWindowSurfaceHeight = mViewerOutput.mWindowSurface.getHeight();
                 finishSurfaceSetup();
             }
 
-            mCameraTexture.setOnFrameAvailableListener(this);
+            mCameraVideoInput.surfaceTexture.setOnFrameAvailableListener(this);
         }
 
         /**
@@ -572,13 +564,13 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private void releaseGl() {
             GlUtil.checkGlError("releaseGl start");
 
-            if (mWindowSurface != null) {
-                mWindowSurface.release();
-                mWindowSurface = null;
+            if (mViewerOutput.mWindowSurface != null) {
+                mViewerOutput.mWindowSurface.release();
+                mViewerOutput.mWindowSurface = null;
             }
-            if (mTexProgram != null) {
-                mTexProgram.release();
-                mTexProgram = null;
+            if (mCameraVideoInput.mTexProgram != null) {
+                mCameraVideoInput.mTexProgram.release();
+                mCameraVideoInput.mTexProgram = null;
             }
             GlUtil.checkGlError("releaseGl done");
 
@@ -595,8 +587,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private void surfaceChanged(int width, int height) {
             Log.d(TAG, "RenderThread surfaceChanged " + width + "x" + height);
 
-            mWindowSurfaceWidth = width;
-            mWindowSurfaceHeight = height;
+            mViewerOutput.mWindowSurfaceWidth = width;
+            mViewerOutput.mWindowSurfaceHeight = height;
             finishSurfaceSetup();
         }
 
@@ -616,8 +608,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * Open the camera (to set mCameraAspectRatio) before calling here.
          */
         private void finishSurfaceSetup() {
-            int width = mWindowSurfaceWidth;
-            int height = mWindowSurfaceHeight;
+            int width = mViewerOutput.mWindowSurfaceWidth;
+            int height = mViewerOutput.mWindowSurfaceHeight;
             Log.d(TAG, "finishSurfaceSetup size=" + width + "x" + height +
                     " camera=" + mCameraPreviewWidth + "x" + mCameraPreviewHeight);
 
@@ -636,7 +628,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             // Ready to go, start the camera.
             Log.d(TAG, "starting camera preview");
             try {
-                mCamera.setPreviewTexture(mCameraTexture);
+                mCamera.setPreviewTexture(mCameraVideoInput.surfaceTexture);
             } catch (IOException ioe) {
                 throw new RuntimeException(ioe);
             }
@@ -648,8 +640,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * values set by the UI.
          */
         private void updateGeometry() {
-            int width = mWindowSurfaceWidth;
-            int height = mWindowSurfaceHeight;
+            int width = mViewerOutput.mWindowSurfaceWidth;
+            int height = mViewerOutput.mWindowSurfaceHeight;
 
             int smallDim = Math.min(width, height);
             // Max scale is a bit larger than the screen, so we can show over-size.
@@ -661,10 +653,10 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             float zoomFactor = 1.0f - (mZoomPercent / 100.0f);
             int rotAngle = Math.round(360 * (mRotatePercent / 100.0f));
 
-            mRect.setScale(newWidth, newHeight);
-            mRect.setPosition(mPosX, mPosY);
-            mRect.setRotation(rotAngle);
-            mRectDrawable.setScale(zoomFactor);
+            mViewerOutput.mRect.setScale(newWidth, newHeight);
+            mViewerOutput.mRect.setPosition(mPosX, mPosY);
+            mViewerOutput.mRect.setRotation(rotAngle);
+            mViewerOutput.mRectDrawable.setScale(zoomFactor);
 
             mMainHandler.sendRectSize(newWidth, newHeight);
             mMainHandler.sendZoomArea(Math.round(mCameraPreviewWidth * zoomFactor),
@@ -681,7 +673,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * Handles incoming frame of data from the camera.
          */
         private void frameAvailable() {
-            mCameraTexture.updateTexImage();
+            mCameraVideoInput.surfaceTexture.updateTexImage();
             draw();
         }
 
@@ -690,11 +682,13 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          */
         private void draw() {
             GlUtil.checkGlError("draw start");
-
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-            mRect.draw(mTexProgram, mDisplayProjectionMatrix);
-            mWindowSurface.swapBuffers();
+
+            mViewerOutput.mRect.setTexture(mCameraVideoInput.textureId);
+            mViewerOutput.mRect.draw(mCameraVideoInput.mTexProgram, mDisplayProjectionMatrix);
+
+            mViewerOutput.mWindowSurface.swapBuffers();
 
             GlUtil.checkGlError("draw done");
         }
@@ -716,7 +710,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
         private void setPosition(int x, int y) {
             mPosX = x;
-            mPosY = mWindowSurfaceHeight - y;   // GLES is upside-down
+            mPosY = mViewerOutput.mWindowSurfaceHeight - y;   // GLES is upside-down
             updateGeometry();
         }
 
