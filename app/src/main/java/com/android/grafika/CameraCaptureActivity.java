@@ -21,6 +21,7 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.NonNull;
@@ -41,12 +42,14 @@ import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.widget.Toast;
 
-import com.android.grafika.gles.FullFrameRect;
 import com.android.grafika.gles.Texture2dProgram;
 
 import java.io.File;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
+import java.util.GregorianCalendar;
+import java.util.Locale;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -149,12 +152,33 @@ public class CameraCaptureActivity extends Activity
     // this is static so it survives activity restarts
     private static TextureMovieEncoder sVideoEncoder = new TextureMovieEncoder();
 
+    private static final SimpleDateFormat mDateTimeFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US);
+    public static final File getCaptureFile(final String type, final String ext) {
+        final File dir = new File(Environment.getExternalStoragePublicDirectory(type), "Grafica");
+        Log.d(TAG, "path=" + dir.toString());
+        dir.mkdirs();
+        if (dir.canWrite()) {
+            return new File(dir, getDateTimeString() + ext);
+        }
+        return null;
+    }
+
+    private static final String getDateTimeString() {
+        final GregorianCalendar now = new GregorianCalendar();
+        return mDateTimeFormat.format(now.getTime());
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera_capture);
 
         File outputFile = new File(getFilesDir(), "camera-test.mp4");
+        try {
+            outputFile = getCaptureFile(Environment.DIRECTORY_MOVIES, ".mp4");
+        } catch (final NullPointerException e) {
+            throw new RuntimeException("This app has no permission of writing external storage");
+        }
         TextView fileText = (TextView) findViewById(R.id.cameraOutputFile_text);
         fileText.setText(outputFile.toString());
 
@@ -476,12 +500,11 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
     private TextureMovieEncoder mVideoEncoder;
     private File mOutputFile;
 
-    private FullFrameRect mFullScreen;
+    //private FullFrameRect mFullScreen;
 
     private final float[] mSTMatrix = new float[16];
-    private int mTextureId;
+    private VideoInput mVideoInput = new VideoInput();
 
-    private SurfaceTexture mSurfaceTexture;
     private boolean mRecordingEnabled;
     private int mRecordingStatus;
     private int mFrameCount;
@@ -508,7 +531,7 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
         mVideoEncoder = movieEncoder;
         mOutputFile = outputFile;
 
-        mTextureId = -1;
+        //mTextureId = -1;
 
         mRecordingStatus = -1;
         mRecordingEnabled = false;
@@ -528,15 +551,15 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
      * For best results, call this *after* disabling Camera preview.
      */
     public void notifyPausing() {
-        if (mSurfaceTexture != null) {
+        if (mVideoInput.surfaceTexture != null) {
             Log.d(TAG, "renderer pausing -- releasing SurfaceTexture");
-            mSurfaceTexture.release();
-            mSurfaceTexture = null;
+            mVideoInput.surfaceTexture.release();
+            mVideoInput.surfaceTexture = null;
         }
-        if (mFullScreen != null) {
-            mFullScreen.release(false);     // assume the GLSurfaceView EGL context is about
-            mFullScreen = null;             //  to be destroyed
-        }
+//        if (mFullScreen != null) {
+//            mFullScreen.release(false);     // assume the GLSurfaceView EGL context is about
+//            mFullScreen = null;             //  to be destroyed
+//        }
         mIncomingWidth = mIncomingHeight = -1;
     }
 
@@ -607,18 +630,18 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
                 throw new RuntimeException("Unknown filter mode " + mNewFilter);
         }
 
-        // Do we need a whole new program?  (We want to avoid doing this if we don't have
-        // too -- compiling a program could be expensive.)
-        if (programType != mFullScreen.getProgram().getProgramType()) {
-            mFullScreen.changeProgram(new Texture2dProgram(programType));
-            // If we created a new program, we need to initialize the texture width/height.
-            mIncomingSizeUpdated = true;
-        }
-
-        // Update the filter kernel (if any).
-        if (kernel != null) {
-            mFullScreen.getProgram().setKernel(kernel, colorAdj);
-        }
+//        // Do we need a whole new program?  (We want to avoid doing this if we don't have
+//        // too -- compiling a program could be expensive.)
+//        if (programType != mFullScreen.getProgram().getProgramType()) {
+//            mFullScreen.changeProgram(new Texture2dProgram(programType));
+//            // If we created a new program, we need to initialize the texture width/height.
+//            mIncomingSizeUpdated = true;
+//        }
+//
+//        // Update the filter kernel (if any).
+//        if (kernel != null) {
+//            mFullScreen.getProgram().setKernel(kernel, colorAdj);
+//        }
 
         mCurrentFilter = mNewFilter;
     }
@@ -653,19 +676,18 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
 
         // Set up the texture blitter that will be used for on-screen display.  This
         // is *not* applied to the recording, because that uses a separate shader.
-        mFullScreen = new FullFrameRect(
-                new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT));
-
-        mTextureId = mFullScreen.createTextureObject();
+        //mFullScreen = new FullFrameRect(new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT));
+        mVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
+        mVideoInput.textureId = mVideoInput.texProgram.createTextureObject();
 
         // Create a SurfaceTexture, with an external texture, in this EGL context.  We don't
         // have a Looper in this thread -- GLSurfaceView doesn't create one -- so the frame
         // available messages will arrive on the main thread.
-        mSurfaceTexture = new SurfaceTexture(mTextureId);
+        mVideoInput.surfaceTexture = new SurfaceTexture(mVideoInput.textureId);
 
         // Tell the UI thread to enable the camera preview.
         mCameraHandler.sendMessage(mCameraHandler.obtainMessage(
-                CameraCaptureActivity.CameraHandler.MSG_SET_SURFACE_TEXTURE, mSurfaceTexture));
+                CameraCaptureActivity.CameraHandler.MSG_SET_SURFACE_TEXTURE, mVideoInput.surfaceTexture));
     }
 
     @Override
@@ -676,12 +698,12 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @Override
     public void onDrawFrame(GL10 unused) {
-        if (VERBOSE) Log.d(TAG, "onDrawFrame tex=" + mTextureId);
+        if (VERBOSE) Log.d(TAG, "onDrawFrame tex=" + mVideoInput.textureId);
         boolean showBox = false;
 
         // Latch the latest frame.  If there isn't anything new, we'll just re-use whatever
         // was there before.
-        mSurfaceTexture.updateTexImage();
+        mVideoInput.surfaceTexture.updateTexImage();
 
         // If the recording state is changing, take care of it here.  Ideally we wouldn't
         // be doing all this in onDrawFrame(), but the EGLContext sharing with GLSurfaceView
@@ -728,11 +750,11 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
         // we just do it here.
         //
         // TODO: be less lame.
-        mVideoEncoder.setTextureId(mTextureId);
+        mVideoEncoder.setTextureId(mVideoInput.textureId);
 
         // Tell the video encoder thread that a new frame is available.
         // This will be ignored if we're not actually recording.
-        mVideoEncoder.frameAvailable(mSurfaceTexture);
+        mVideoEncoder.frameAvailable(mVideoInput.surfaceTexture);
 
         if (mIncomingWidth <= 0 || mIncomingHeight <= 0) {
             // Texture size isn't set yet.  This is only used for the filters, but to be
@@ -746,13 +768,13 @@ class CameraSurfaceRenderer implements GLSurfaceView.Renderer {
             updateFilter();
         }
         if (mIncomingSizeUpdated) {
-            mFullScreen.getProgram().setTexSize(mIncomingWidth, mIncomingHeight);
+            //mFullScreen.getProgram().setTexSize(mIncomingWidth, mIncomingHeight);
             mIncomingSizeUpdated = false;
         }
 
         // Draw the video frame.
-        mSurfaceTexture.getTransformMatrix(mSTMatrix);
-        mFullScreen.drawFrame(mTextureId, mSTMatrix);
+        mVideoInput.surfaceTexture.getTransformMatrix(mSTMatrix);
+        //mFullScreen.drawFrame(mTextureId, mSTMatrix);
 
         // Draw a flashing box if we're recording.  This only appears on screen.
         showBox = (mRecordingStatus == RECORDING_ON);

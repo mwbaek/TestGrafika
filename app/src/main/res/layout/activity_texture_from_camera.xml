@@ -99,4 +99,14 @@
         android:layout_toRightOf="@+id/tfcRotateLabel_text"
         android:layout_below="@+id/tfcSize_seekbar" />
 
+    <Button
+        android:id="@+id/toggleRecording_button"
+        style="?android:attr/buttonStyleSmall"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentRight="true"
+        android:text="@string/toggleRecordingOn"
+        android:onClick="clickToggleRecording" />
+
 </RelativeLayout>

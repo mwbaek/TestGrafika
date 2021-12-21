@@ -18,9 +18,11 @@ package com.android.grafika;
 
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
+import android.opengl.EGL14;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -29,19 +31,23 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
+import android.widget.Button;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.app.Activity;
 
-import com.android.grafika.gles.Drawable2d;
 import com.android.grafika.gles.EglCore;
 import com.android.grafika.gles.GlUtil;
-import com.android.grafika.gles.Sprite2d;
 import com.android.grafika.gles.Texture2dProgram;
 import com.android.grafika.gles.WindowSurface;
 
+import java.io.File;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
+import java.util.GregorianCalendar;
+import java.util.Locale;
 
 /**
  * Direct the Camera preview to a GLES texture and manipulate it.
@@ -116,7 +122,25 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
     private int mRectWidth, mRectHeight;
     private int mZoomWidth, mZoomHeight;
     private int mRotateDeg;
+    private boolean mRecordingEnabled;      // controls button state
 
+    private static TextureMovieEncoder mVideoEncoder = new TextureMovieEncoder();
+
+    private static final SimpleDateFormat mDateTimeFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US);
+    public static final File getCaptureFile(final String type, final String ext) {
+        final File dir = new File(Environment.getExternalStoragePublicDirectory(type), "Grafica");
+        Log.d(TAG, "path=" + dir.toString());
+        dir.mkdirs();
+        if (dir.canWrite()) {
+            return new File(dir, getDateTimeString() + ext);
+        }
+        return null;
+    }
+
+    private static final String getDateTimeString() {
+        final GregorianCalendar now = new GregorianCalendar();
+        return mDateTimeFormat.format(now.getTime());
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -322,6 +346,32 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         str = getString(R.string.tfcZoomArea, mZoomWidth, mZoomHeight);
         tv = (TextView) findViewById(R.id.tfcZoomArea_text);
         tv.setText(str);
+
+        Button toggleRelease = (Button) findViewById(R.id.toggleRecording_button);
+        int id = mRecordingEnabled ?
+                R.string.toggleRecordingOff : R.string.toggleRecordingOn;
+        toggleRelease.setText(id);
+    }
+
+    public void clickToggleRecording(@SuppressWarnings("unused") View unused) {
+        mRecordingEnabled = !mRecordingEnabled;
+        updateControls();
+
+
+        if(mRecordingEnabled){
+            File outputFile = new File(getFilesDir(), "camera-test.mp4");
+            try {
+                outputFile = getCaptureFile(Environment.DIRECTORY_MOVIES, ".mp4");
+            } catch (final NullPointerException e) {
+                throw new RuntimeException("This app has no permission of writing external storage");
+            }
+
+            RenderHandler rh = mRenderThread.getHandler();
+            rh.sendStartRecording(outputFile);
+        }else{
+            RenderHandler rh = mRenderThread.getHandler();
+            rh.sendStopRecording();
+        }
     }
 
     /**
@@ -456,6 +506,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private int mSizePercent = DEFAULT_SIZE_PERCENT;
         private int mRotatePercent = DEFAULT_ROTATE_PERCENT;
         private float mPosX, mPosY;
+        private boolean mRecordingStatus = false;
+        private File mOutputFile;
 
         private VideoOutput mViewerOutput = new VideoOutput();
 
@@ -537,8 +589,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
             // Create and configure the SurfaceTexture, which will receive frames from the
             // camera.  We set the textured rect's program to render from it.
-            mCameraVideoInput.mTexProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
-            mCameraVideoInput.textureId = mCameraVideoInput.mTexProgram.createTextureObject();
+            mCameraVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
+            mCameraVideoInput.textureId = mCameraVideoInput.texProgram.createTextureObject();
             mCameraVideoInput.surfaceTexture = new SurfaceTexture(mCameraVideoInput.textureId);
 
             if (!newSurface) {
@@ -568,9 +620,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
                 mViewerOutput.mWindowSurface.release();
                 mViewerOutput.mWindowSurface = null;
             }
-            if (mCameraVideoInput.mTexProgram != null) {
-                mCameraVideoInput.mTexProgram.release();
-                mCameraVideoInput.mTexProgram = null;
+            if (mCameraVideoInput.texProgram != null) {
+                mCameraVideoInput.texProgram.release();
+                mCameraVideoInput.texProgram = null;
             }
             GlUtil.checkGlError("releaseGl done");
 
@@ -677,6 +729,15 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             draw();
         }
 
+        private void startRecording(File file){
+            mRecordingStatus = true;
+            this.mOutputFile = file;
+        }
+
+        private void stopRecording(){
+            mRecordingStatus = false;
+        }
+
         /**
          * Draws the scene and submits the buffer.
          */
@@ -686,9 +747,27 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
             mViewerOutput.mRect.setTexture(mCameraVideoInput.textureId);
-            mViewerOutput.mRect.draw(mCameraVideoInput.mTexProgram, mDisplayProjectionMatrix);
-
+            mViewerOutput.mRect.draw(mCameraVideoInput.texProgram, mDisplayProjectionMatrix);
             mViewerOutput.mWindowSurface.swapBuffers();
+
+
+
+
+            if(mRecordingStatus && !mVideoEncoder.isRecording()){
+                mVideoEncoder.startRecording(new TextureMovieEncoder.EncoderConfig(
+                        mOutputFile, 640, 360, 1000000, EGL14.eglGetCurrentContext()));
+            }else if(!mRecordingStatus && mVideoEncoder.isRecording()){
+                mVideoEncoder.stopRecording();
+            }
+
+            if(mVideoEncoder.isRecording()){
+                GlUtil.checkGlError("draw start");
+                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
+                mVideoEncoder.setTextureId(mCameraVideoInput.textureId);
+                mVideoEncoder.frameAvailable(mCameraVideoInput.surfaceTexture);
+            }
 
             GlUtil.checkGlError("draw done");
         }
@@ -806,6 +885,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private static final int MSG_ROTATE_VALUE = 7;
         private static final int MSG_POSITION = 8;
         private static final int MSG_REDRAW = 9;
+        private static final int MSG_START_REC = 10;
+        private static final int MSG_STOP_REC = 11;
 
         // This shouldn't need to be a weak ref, since we'll go away when the Looper quits,
         // but no real harm in it.
@@ -917,6 +998,14 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             sendMessage(obtainMessage(MSG_REDRAW));
         }
 
+        public void sendStartRecording(File file) {
+            sendMessage(obtainMessage(MSG_START_REC, file));
+        }
+
+        public void sendStopRecording() {
+            sendMessage(obtainMessage(MSG_STOP_REC));
+        }
+
         @Override  // runs on RenderThread
         public void handleMessage(Message msg) {
             int what = msg.what;
@@ -958,6 +1047,12 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
                     break;
                 case MSG_REDRAW:
                     renderThread.draw();
+                    break;
+                case MSG_START_REC:
+                    renderThread.startRecording((File)msg.obj);
+                    break;
+                case MSG_STOP_REC:
+                    renderThread.stopRecording();
                     break;
                default:
                     throw new RuntimeException("unknown message " + what);
