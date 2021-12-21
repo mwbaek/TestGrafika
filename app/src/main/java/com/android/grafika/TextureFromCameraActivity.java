@@ -16,11 +16,17 @@
 
 package com.android.grafika;
 
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.PorterDuff;
 import android.graphics.SurfaceTexture;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.hardware.Camera;
 import android.opengl.EGL14;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -46,6 +52,7 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.GregorianCalendar;
 import java.util.Locale;
 
@@ -176,6 +183,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             return;
         }
         mRenderThread = new RenderThread(mHandler);
+        Drawable drawable = getDrawable(R.drawable.auto_pilot_off);
+        BitmapDrawable drawableBitmap = (BitmapDrawable) drawable;
+        mRenderThread.setBitmap(drawableBitmap.getBitmap());
         mRenderThread.setName("TexFromCam Render");
         mRenderThread.start();
         mRenderThread.waitUntilReady();
@@ -500,7 +510,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private float[] mDisplayProjectionMatrix = new float[16];
 
         // Receives the output from the camera preview.
-        private VideoInput mCameraVideoInput = new VideoInput();
+        //private VideoInput mCameraVideoInput = new VideoInput();
+        private ArrayList<VideoInput> mSourceList = new ArrayList<>();
+        private Bitmap mBitmap;
 
         private int mZoomPercent = DEFAULT_ZOOM_PERCENT;
         private int mSizePercent = DEFAULT_SIZE_PERCENT;
@@ -589,6 +601,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
             // Create and configure the SurfaceTexture, which will receive frames from the
             // camera.  We set the textured rect's program to render from it.
+            VideoInput mCameraVideoInput = new VideoInput();
             mCameraVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
             mCameraVideoInput.textureId = mCameraVideoInput.texProgram.createTextureObject();
             mCameraVideoInput.surfaceTexture = new SurfaceTexture(mCameraVideoInput.textureId);
@@ -602,6 +615,34 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
                 mViewerOutput.mWindowSurfaceWidth = mViewerOutput.mWindowSurface.getWidth();
                 mViewerOutput.mWindowSurfaceHeight = mViewerOutput.mWindowSurface.getHeight();
                 finishSurfaceSetup();
+            }
+
+            mSourceList.add(mCameraVideoInput);
+
+
+            VideoInput mImageVideoInput = new VideoInput();
+            mImageVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
+            mImageVideoInput.textureId = mImageVideoInput.texProgram.createTextureObject();
+            mImageVideoInput.surfaceTexture = new SurfaceTexture(mImageVideoInput.textureId);
+            //mImageVideoInput.surfaceTexture.setDefaultBufferSize(640, 480);
+            mImageVideoInput.surface = new Surface(mImageVideoInput.surfaceTexture);
+            //mSourceList.add(mImageVideoInput);
+
+            Canvas c;
+            if (Build.VERSION.SDK_INT >= 23) {
+                c = mImageVideoInput.surface.lockHardwareCanvas();
+            } else {
+                c = mImageVideoInput.surface.lockCanvas(null);
+            }
+            if (c != null) {
+                try
+                {
+                    c.drawColor( 0, PorterDuff.Mode.CLEAR );
+                    c.drawBitmap(mBitmap, 0, 0, null);
+                } catch (Exception e){
+                    Log.d(TAG, e.getMessage());
+                }
+                mImageVideoInput.surface.unlockCanvasAndPost(c);
             }
 
             mCameraVideoInput.surfaceTexture.setOnFrameAvailableListener(this);
@@ -620,9 +661,13 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
                 mViewerOutput.mWindowSurface.release();
                 mViewerOutput.mWindowSurface = null;
             }
-            if (mCameraVideoInput.texProgram != null) {
-                mCameraVideoInput.texProgram.release();
-                mCameraVideoInput.texProgram = null;
+            for (int i=0; i<mSourceList.size(); i++){
+                VideoInput VideoInput = mSourceList.get(i);
+                if (VideoInput.surfaceTexture != null) {
+                    Log.d(TAG, "renderer pausing -- releasing SurfaceTexture");
+                    VideoInput.surfaceTexture.release();
+                    VideoInput.surfaceTexture = null;
+                }
             }
             GlUtil.checkGlError("releaseGl done");
 
@@ -680,7 +725,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             // Ready to go, start the camera.
             Log.d(TAG, "starting camera preview");
             try {
-                mCamera.setPreviewTexture(mCameraVideoInput.surfaceTexture);
+                mCamera.setPreviewTexture(mSourceList.get(0).surfaceTexture);
             } catch (IOException ioe) {
                 throw new RuntimeException(ioe);
             }
@@ -725,7 +770,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * Handles incoming frame of data from the camera.
          */
         private void frameAvailable() {
-            mCameraVideoInput.surfaceTexture.updateTexImage();
+            mSourceList.get(mSourceList.size()-1).surfaceTexture.updateTexImage();
             draw();
         }
 
@@ -743,30 +788,34 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          */
         private void draw() {
             GlUtil.checkGlError("draw start");
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
-            mViewerOutput.mRect.setTexture(mCameraVideoInput.textureId);
-            mViewerOutput.mRect.draw(mCameraVideoInput.texProgram, mDisplayProjectionMatrix);
+            GLES20.glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+            GLES20.glEnable(GLES20.GL_BLEND);
+
+            for (int i=0; i<mSourceList.size(); i++)
+            {
+                mViewerOutput.mRect.setTexture(mSourceList.get(i).textureId);
+                mViewerOutput.mRect.draw(mSourceList.get(i).texProgram, mDisplayProjectionMatrix);
+            }
             mViewerOutput.mWindowSurface.swapBuffers();
 
-
-
+            if(mVideoEncoder.isRecording()){
+                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+                for (int i=0; i<mSourceList.size(); i++)
+                {
+                    mVideoEncoder.setTextureId(mSourceList.get(i).textureId);
+                    mVideoEncoder.frameAvailable(mSourceList.get(i).surfaceTexture);
+                }
+            }
 
             if(mRecordingStatus && !mVideoEncoder.isRecording()){
                 mVideoEncoder.startRecording(new TextureMovieEncoder.EncoderConfig(
                         mOutputFile, 640, 360, 1000000, EGL14.eglGetCurrentContext()));
             }else if(!mRecordingStatus && mVideoEncoder.isRecording()){
                 mVideoEncoder.stopRecording();
-            }
-
-            if(mVideoEncoder.isRecording()){
-                GlUtil.checkGlError("draw start");
-                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-                mVideoEncoder.setTextureId(mCameraVideoInput.textureId);
-                mVideoEncoder.frameAvailable(mCameraVideoInput.surfaceTexture);
             }
 
             GlUtil.checkGlError("draw done");
@@ -791,6 +840,10 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             mPosX = x;
             mPosY = mViewerOutput.mWindowSurfaceHeight - y;   // GLES is upside-down
             updateGeometry();
+        }
+
+        public void setBitmap(Bitmap mBitmap) {
+            this.mBitmap = mBitmap;
         }
 
         /**
