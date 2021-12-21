@@ -626,7 +626,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             mImageVideoInput.surfaceTexture = new SurfaceTexture(mImageVideoInput.textureId);
             //mImageVideoInput.surfaceTexture.setDefaultBufferSize(640, 480);
             mImageVideoInput.surface = new Surface(mImageVideoInput.surfaceTexture);
-            //mSourceList.add(mImageVideoInput);
+            mSourceList.add(mImageVideoInput);
 
             Canvas c;
             if (Build.VERSION.SDK_INT >= 23) {
@@ -789,10 +789,15 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private void draw() {
             GlUtil.checkGlError("draw start");
 
-            GLES20.glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
             GLES20.glEnable(GLES20.GL_BLEND);
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST);
+            GLES20.glDisable(GLES20.GL_CULL_FACE);
+
+            GLES20.glViewport(0, 0, mViewerOutput.mWindowSurfaceWidth, mViewerOutput.mWindowSurfaceHeight);
 
             for (int i=0; i<mSourceList.size(); i++)
             {
