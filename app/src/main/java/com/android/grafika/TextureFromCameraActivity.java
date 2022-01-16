@@ -133,6 +133,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
     private static TextureMovieEncoder mVideoEncoder = new TextureMovieEncoder();
 
+    private static boolean mIsOverlayTask = false;
+
     private static final SimpleDateFormat mDateTimeFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US);
     public static final File getCaptureFile(final String type, final String ext) {
         final File dir = new File(Environment.getExternalStoragePublicDirectory(type), "Grafica");
@@ -624,9 +626,10 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             mImageVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
             mImageVideoInput.textureId = mImageVideoInput.texProgram.createTextureObject();
             mImageVideoInput.surfaceTexture = new SurfaceTexture(mImageVideoInput.textureId);
-            //mImageVideoInput.surfaceTexture.setDefaultBufferSize(640, 480);
+            mImageVideoInput.surfaceTexture.setDefaultBufferSize(640, 480);
             mImageVideoInput.surface = new Surface(mImageVideoInput.surfaceTexture);
-            mSourceList.add(mImageVideoInput);
+            if(mIsOverlayTask)
+                mSourceList.add(mImageVideoInput);
 
             Canvas c;
             if (Build.VERSION.SDK_INT >= 23) {
@@ -770,7 +773,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * Handles incoming frame of data from the camera.
          */
         private void frameAvailable() {
-            mSourceList.get(mSourceList.size()-1).surfaceTexture.updateTexImage();
+            mSourceList.get(0).surfaceTexture.updateTexImage();
             draw();
         }
 
