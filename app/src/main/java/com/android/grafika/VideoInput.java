@@ -10,6 +10,8 @@ public class VideoInput {
     public int textureId = -1;
     public SurfaceTexture 	surfaceTexture;
     public Surface surface;
+    public float scale = 1.0f;
+    public float angle = 270.0f;
 
     //public VideoSource(){}
 }

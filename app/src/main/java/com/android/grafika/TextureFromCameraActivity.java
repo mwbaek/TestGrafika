@@ -91,7 +91,7 @@ import java.util.Locale;
  */
 public class TextureFromCameraActivity extends Activity implements SurfaceHolder.Callback,
         SeekBar.OnSeekBarChangeListener {
-    private static final String TAG = MainActivity.TAG;
+    private static final String TAG = "TestGrafika";
 
     private static final int DEFAULT_ZOOM_PERCENT = 0;      // 0-100
     private static final int DEFAULT_SIZE_PERCENT = 50;     // 0-100
@@ -133,7 +133,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
     private static TextureMovieEncoder mVideoEncoder = new TextureMovieEncoder();
 
-    private static boolean mIsOverlayTask = false;
+    private static boolean mIsOverlayTask = true;
 
     private static final SimpleDateFormat mDateTimeFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US);
     public static final File getCaptureFile(final String type, final String ext) {
@@ -524,6 +524,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
         private File mOutputFile;
 
         private VideoOutput mViewerOutput = new VideoOutput();
+        private boolean finishSurfaceAvailable = false;
+        private boolean startFinishSurfaceSetup = false;
+        private boolean finishSurfaceChanged = false;
 
         /**
          * Constructor.  Pass in the MainHandler, which allows us to send stuff back to the
@@ -586,6 +589,38 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             Looper.myLooper().quit();
         }
 
+        private void addImage(){
+            VideoInput mImageVideoInput = new VideoInput();
+            mImageVideoInput.scale = 1.0f;
+            mImageVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
+            mImageVideoInput.textureId = mImageVideoInput.texProgram.createTextureObject();
+            Log.d(TAG, "mImageVideoInput.textureId: "+mImageVideoInput.textureId);
+            mImageVideoInput.surfaceTexture = new SurfaceTexture(mImageVideoInput.textureId);
+            mImageVideoInput.surfaceTexture.setDefaultBufferSize(640, 480);
+            mImageVideoInput.surface = new Surface(mImageVideoInput.surfaceTexture);
+
+            Canvas c;
+            if (Build.VERSION.SDK_INT >= 23) {
+                c = mImageVideoInput.surface.lockHardwareCanvas();
+            } else {
+                c = mImageVideoInput.surface.lockCanvas(null);
+            }
+            if (c != null) {
+                try
+                {
+                    c.drawColor( 0, PorterDuff.Mode.CLEAR );
+                    Log.d(TAG, "mBitmap: "+this.mBitmap);
+                    c.drawBitmap(mBitmap, 0, 0, null);
+                } catch (Exception e){
+                    Log.d(TAG, e.getMessage());
+                }
+                mImageVideoInput.surface.unlockCanvasAndPost(c);
+            }
+
+            if(mIsOverlayTask)
+                mSourceList.add(mImageVideoInput);
+        }
+
         /**
          * Returns the render thread's Handler.  This may be called from any thread.
          */
@@ -603,9 +638,14 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
             // Create and configure the SurfaceTexture, which will receive frames from the
             // camera.  We set the textured rect's program to render from it.
+
+            //addImage();
+
             VideoInput mCameraVideoInput = new VideoInput();
+            mCameraVideoInput.scale = 0.5f;
             mCameraVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
             mCameraVideoInput.textureId = mCameraVideoInput.texProgram.createTextureObject();
+            Log.d(TAG, "mCameraVideoInput.textureId: "+mCameraVideoInput.textureId);
             mCameraVideoInput.surfaceTexture = new SurfaceTexture(mCameraVideoInput.textureId);
 
             if (!newSurface) {
@@ -622,33 +662,14 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             mSourceList.add(mCameraVideoInput);
 
 
-            VideoInput mImageVideoInput = new VideoInput();
-            mImageVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
-            mImageVideoInput.textureId = mImageVideoInput.texProgram.createTextureObject();
-            mImageVideoInput.surfaceTexture = new SurfaceTexture(mImageVideoInput.textureId);
-            mImageVideoInput.surfaceTexture.setDefaultBufferSize(640, 480);
-            mImageVideoInput.surface = new Surface(mImageVideoInput.surfaceTexture);
-            if(mIsOverlayTask)
-                mSourceList.add(mImageVideoInput);
+            //addImage();
 
-            Canvas c;
-            if (Build.VERSION.SDK_INT >= 23) {
-                c = mImageVideoInput.surface.lockHardwareCanvas();
-            } else {
-                c = mImageVideoInput.surface.lockCanvas(null);
-            }
-            if (c != null) {
-                try
-                {
-                    c.drawColor( 0, PorterDuff.Mode.CLEAR );
-                    c.drawBitmap(mBitmap, 0, 0, null);
-                } catch (Exception e){
-                    Log.d(TAG, e.getMessage());
-                }
-                mImageVideoInput.surface.unlockCanvasAndPost(c);
-            }
 
             mCameraVideoInput.surfaceTexture.setOnFrameAvailableListener(this);
+
+            finishSurfaceAvailable = true;
+            if(!startFinishSurfaceSetup && finishSurfaceChanged)
+                finishSurfaceSetup();
         }
 
         /**
@@ -689,7 +710,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
             mViewerOutput.mWindowSurfaceWidth = width;
             mViewerOutput.mWindowSurfaceHeight = height;
-            finishSurfaceSetup();
+            if(finishSurfaceAvailable)
+                finishSurfaceSetup();
+            finishSurfaceChanged = true;
         }
 
         /**
@@ -707,7 +730,8 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * <p>
          * Open the camera (to set mCameraAspectRatio) before calling here.
          */
-        private void finishSurfaceSetup() {
+        private synchronized void finishSurfaceSetup() {
+            startFinishSurfaceSetup = true;
             int width = mViewerOutput.mWindowSurfaceWidth;
             int height = mViewerOutput.mWindowSurfaceHeight;
             Log.d(TAG, "finishSurfaceSetup size=" + width + "x" + height +
@@ -732,7 +756,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             } catch (IOException ioe) {
                 throw new RuntimeException(ioe);
             }
-            mCamera.startPreview();
+            try{
+                mCamera.startPreview();
+            }catch (Throwable t){}
         }
 
         /**
@@ -805,7 +831,15 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             for (int i=0; i<mSourceList.size(); i++)
             {
                 mViewerOutput.mRect.setTexture(mSourceList.get(i).textureId);
+
+                float scaleX = mViewerOutput.mRect.getScaleX();
+                float scaleY = mViewerOutput.mRect.getScaleY();
+                mViewerOutput.mRect.setScale(scaleX*mSourceList.get(i).scale, scaleY*mSourceList.get(i).scale);
+
+                mViewerOutput.mRect.setRotation(mSourceList.get(i).angle);
+
                 mViewerOutput.mRect.draw(mSourceList.get(i).texProgram, mDisplayProjectionMatrix);
+                mViewerOutput.mRect.setScale(scaleX, scaleY);
             }
             mViewerOutput.mWindowSurface.swapBuffers();
 
@@ -852,6 +886,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
         public void setBitmap(Bitmap mBitmap) {
             this.mBitmap = mBitmap;
+            Log.d(TAG, "mBitmap: "+this.mBitmap);
         }
 
         /**
@@ -972,6 +1007,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * Call from UI thread.
          */
         public void sendSurfaceAvailable(SurfaceHolder holder, boolean newSurface) {
+            Log.d(TAG, "sendSurfaceAvailable newSurface: "+newSurface);
             sendMessage(obtainMessage(MSG_SURFACE_AVAILABLE,
                     newSurface ? 1 : 0, 0, holder));
         }
