@@ -589,9 +589,9 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             Looper.myLooper().quit();
         }
 
-        private void addImage(){
+        private void addImage(float scale){
             VideoInput mImageVideoInput = new VideoInput();
-            mImageVideoInput.scale = 1.0f;
+            mImageVideoInput.scale = scale;
             mImageVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
             mImageVideoInput.textureId = mImageVideoInput.texProgram.createTextureObject();
             Log.d(TAG, "mImageVideoInput.textureId: "+mImageVideoInput.textureId);
@@ -639,10 +639,10 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
             // Create and configure the SurfaceTexture, which will receive frames from the
             // camera.  We set the textured rect's program to render from it.
 
-            //addImage();
+            //addImage(0.5f);
 
             VideoInput mCameraVideoInput = new VideoInput();
-            mCameraVideoInput.scale = 0.5f;
+            mCameraVideoInput.scale = 1.0f;
             mCameraVideoInput.texProgram = new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT);
             mCameraVideoInput.textureId = mCameraVideoInput.texProgram.createTextureObject();
             Log.d(TAG, "mCameraVideoInput.textureId: "+mCameraVideoInput.textureId);
@@ -661,11 +661,12 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
             mSourceList.add(mCameraVideoInput);
 
+            //
+            addImage(1.5f);
 
-            //addImage();
 
-
-            mCameraVideoInput.surfaceTexture.setOnFrameAvailableListener(this);
+            mSourceList.get(0).surfaceTexture.setOnFrameAvailableListener(this);
+            //mCameraVideoInput.surfaceTexture.setOnFrameAvailableListener(this);
 
             finishSurfaceAvailable = true;
             if(!startFinishSurfaceSetup && finishSurfaceChanged)
@@ -799,7 +800,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
          * Handles incoming frame of data from the camera.
          */
         private void frameAvailable() {
-            mSourceList.get(0).surfaceTexture.updateTexImage();
+            //mSourceList.get(0).surfaceTexture.updateTexImage();
             draw();
         }
 
@@ -830,6 +831,7 @@ public class TextureFromCameraActivity extends Activity implements SurfaceHolder
 
             for (int i=0; i<mSourceList.size(); i++)
             {
+                mSourceList.get(i).surfaceTexture.updateTexImage();
                 mViewerOutput.mRect.setTexture(mSourceList.get(i).textureId);
 
                 float scaleX = mViewerOutput.mRect.getScaleX();
