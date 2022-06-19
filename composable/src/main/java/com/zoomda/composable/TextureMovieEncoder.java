@@ -26,12 +26,14 @@ import android.util.Log;
 
 import com.zoomda.composable.gles.EglCore;
 import com.zoomda.composable.gles.FullFrameRect;
+import com.zoomda.composable.gles.GlUtil;
 import com.zoomda.composable.gles.Texture2dProgram;
 import com.zoomda.composable.gles.WindowSurface;
 
 import java.io.File;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 
 /**
  * Encode a movie from frames rendered from an external texture image.
@@ -68,11 +70,14 @@ public class TextureMovieEncoder implements Runnable {
     private static final int MSG_SET_TEXTURE_ID = 3;
     private static final int MSG_UPDATE_SHARED_CONTEXT = 4;
     private static final int MSG_QUIT = 5;
+    private static final int MSG_DRAW_FRAME = 6;
+    private static final int MSG_SWAP_BUFFERS = 7;
 
     // ----- accessed exclusively by encoder thread -----
-    private WindowSurface mInputWindowSurface;
+    //private WindowSurface mInputWindowSurface;
     private EglCore mEglCore;
-    private FullFrameRect mFullScreen;
+    //private FullFrameRect mFullScreen;
+    private VideoOutput mOutput = new VideoOutput();
     private int mTextureId;
     private int mFrameNum;
     private VideoEncoderCore mVideoEncoder;
@@ -83,6 +88,8 @@ public class TextureMovieEncoder implements Runnable {
     private Object mReadyFence = new Object();      // guards ready/running
     private boolean mReady;
     private boolean mRunning;
+
+    private float[] mDisplayProjectionMatrix;
 
 
     /**
@@ -231,6 +238,26 @@ public class TextureMovieEncoder implements Runnable {
         mHandler.sendMessage(mHandler.obtainMessage(MSG_SET_TEXTURE_ID, id, 0, null));
     }
 
+    public void drawAllSources(ArrayList<VideoInput> videoInputs) {
+        synchronized (mReadyFence) {
+            if (!mReady) {
+                Log.d(TAG, "drawAllSources return; return; return; return; return;");
+                return;
+            }
+        }
+        long timestamp = System.currentTimeMillis();
+        for (int i=0; i<1; i++){
+
+            videoInputs.get(i).surfaceTexture.updateTexImage();
+
+            int tetId = videoInputs.get(i).textureId;
+            mHandler.sendMessage(mHandler.obtainMessage(MSG_DRAW_FRAME, (int) tetId, (int) 0, videoInputs.get(i)));
+        }
+
+        mHandler.sendMessage(mHandler.obtainMessage(MSG_SWAP_BUFFERS,
+                (int) (timestamp >> 32), (int) timestamp, new float[16]));
+    }
+
     /**
      * Encoder thread entry point.  Establishes Looper/Handler and waits for messages.
      * <p>
@@ -297,6 +324,14 @@ public class TextureMovieEncoder implements Runnable {
                 case MSG_QUIT:
                     Looper.myLooper().quit();
                     break;
+                case MSG_DRAW_FRAME:
+                    encoder.drawFrame((VideoInput) obj, inputMessage.arg1);
+                    break;
+                case MSG_SWAP_BUFFERS:
+                    long timestamp2 = (((long) inputMessage.arg1) << 32) |
+                            (((long) inputMessage.arg2) & 0xffffffffL);
+                    encoder.swapBuffers((float[]) obj, timestamp2);
+                    break;
                 default:
                     throw new RuntimeException("Unhandled msg what=" + what);
             }
@@ -323,14 +358,44 @@ public class TextureMovieEncoder implements Runnable {
      * @param timestampNanos The frame's timestamp, from SurfaceTexture.
      */
     private void handleFrameAvailable(float[] transform, long timestampNanos) {
-        if (VERBOSE) Log.d(TAG, "handleFrameAvailable tr=" + transform);
+//        if (VERBOSE) Log.d(TAG, "handleFrameAvailable tr=" + transform);
+//        mVideoEncoder.drainEncoder(false);
+//        mFullScreen.drawFrame(mTextureId, transform);
+//
+//        drawBox(mFrameNum++);
+//
+//        mInputWindowSurface.setPresentationTime(timestampNanos);
+//        mInputWindowSurface.swapBuffers();
+    }
+
+    //float[] transform = new float[16];
+
+    private void drawFrame(VideoInput videoInput, int textureId) {
+//        float[] transform = new float[16];      // TODO - avoid alloc every frame
+//        SurfaceTexture st = videoInput.surfaceTexture;
+//        st.getTransformMatrix(transform);
+
+        //mFullScreen.drawFrame(textureId, GlUtil.IDENTITY_MATRIX);
+
+        mOutput.mRect.setPosition(640 / 2.0f, 360 / 2.0f);
+        mOutput.mRect.setScale(640, 360);
+        mOutput.mRect.setRotation(0);
+        mOutput.mRectDrawable.setScale(1.0f);
+
+        mOutput.mRect.setTexture(textureId);
+        mOutput.mRect.draw(videoInput.texProgram, mDisplayProjectionMatrix);
+
+        //drawBox(mFrameNum++);
+    }
+
+    private void swapBuffers(float[] transform, long timestampNanos) {
         mVideoEncoder.drainEncoder(false);
-        mFullScreen.drawFrame(mTextureId, transform);
 
-        drawBox(mFrameNum++);
+        mOutput.mWindowSurface.swapBuffers();
 
-        mInputWindowSurface.setPresentationTime(timestampNanos);
-        mInputWindowSurface.swapBuffers();
+        //mInputWindowSurface.setPresentationTime(timestampNanos);
+        //mInputWindowSurface.swapBuffers();
+        //mOutput.mWindowSurface.swapBuffers();
     }
 
     /**
@@ -361,18 +426,20 @@ public class TextureMovieEncoder implements Runnable {
         Log.d(TAG, "handleUpdatedSharedContext " + newSharedContext);
 
         // Release the EGLSurface and EGLContext.
-        mInputWindowSurface.releaseEglSurface();
-        mFullScreen.release(false);
+        //mInputWindowSurface.releaseEglSurface();
+        //mFullScreen.release(false);
+        mOutput.mWindowSurface.releaseEglSurface();
         mEglCore.release();
 
         // Create a new EGLContext and recreate the window surface.
         mEglCore = new EglCore(newSharedContext, EglCore.FLAG_RECORDABLE);
-        mInputWindowSurface.recreate(mEglCore);
-        mInputWindowSurface.makeCurrent();
+        //mInputWindowSurface.recreate(mEglCore);
+        //mInputWindowSurface.makeCurrent();
+        mOutput.mWindowSurface.recreate(mEglCore);
+        mOutput.mWindowSurface.makeCurrent();
 
         // Create new programs and such for the new context.
-        mFullScreen = new FullFrameRect(
-                new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT));
+//        mFullScreen = new FullFrameRect(new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT));
     }
 
     private void prepareEncoder(EGLContext sharedContext, int width, int height, int bitRate,
@@ -383,23 +450,27 @@ public class TextureMovieEncoder implements Runnable {
             throw new RuntimeException(ioe);
         }
         mEglCore = new EglCore(sharedContext, EglCore.FLAG_RECORDABLE);
-        mInputWindowSurface = new WindowSurface(mEglCore, mVideoEncoder.getInputSurface(), true);
-        mInputWindowSurface.makeCurrent();
+//        mInputWindowSurface = new WindowSurface(mEglCore, mVideoEncoder.getInputSurface(), true);
+//        mInputWindowSurface.makeCurrent();
+        mOutput.mWindowSurface = new WindowSurface(mEglCore, mVideoEncoder.getInputSurface(), true);
+        mOutput.mWindowSurface.makeCurrent();
 
-        mFullScreen = new FullFrameRect(
-                new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT));
+//        mFullScreen = new FullFrameRect(
+//                new Texture2dProgram(Texture2dProgram.ProgramType.TEXTURE_EXT));
     }
 
     private void releaseEncoder() {
         mVideoEncoder.release();
-        if (mInputWindowSurface != null) {
-            mInputWindowSurface.release();
-            mInputWindowSurface = null;
-        }
-        if (mFullScreen != null) {
-            mFullScreen.release(false);
-            mFullScreen = null;
-        }
+//        if (mInputWindowSurface != null) {
+//            mInputWindowSurface.release();
+//            mInputWindowSurface = null;
+//        }
+//        if (mFullScreen != null) {
+//            mFullScreen.release(false);
+//            mFullScreen = null;
+//        }
+        mOutput.mWindowSurface.release();
+        mOutput.mWindowSurface = null;
         if (mEglCore != null) {
             mEglCore.release();
             mEglCore = null;
@@ -410,12 +481,17 @@ public class TextureMovieEncoder implements Runnable {
      * Draws a box, with position offset.
      */
     private void drawBox(int posn) {
-        final int width = mInputWindowSurface.getWidth();
+        //final int width = mInputWindowSurface.getWidth();
+        final int width = mOutput.mWindowSurface.getWidth();
         int xpos = (posn * 4) % (width - 50);
         GLES20.glEnable(GLES20.GL_SCISSOR_TEST);
         GLES20.glScissor(xpos, 0, 100, 100);
         GLES20.glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+    }
+
+    public void setDisplayProjectionMatrix(float[] mDisplayProjectionMatrix) {
+        this.mDisplayProjectionMatrix = mDisplayProjectionMatrix;
     }
 }

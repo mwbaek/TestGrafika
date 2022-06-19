@@ -223,6 +223,7 @@ public class VideoRenderer {
 
         // Orthographic projection matrix.
         private float[] mDisplayProjectionMatrix = new float[16];
+        private float[] mCodecProjectionMatrix = new float[16];
 
         // Receives the output from the camera preview.
         //private VideoInput mCameraVideoInput = new VideoInput();
@@ -453,6 +454,8 @@ public class VideoRenderer {
             // Default position is center of screen.
             mPosX = width / 2.0f;
             mPosY = height / 2.0f;
+            Log.d(TAG, "mPosX: "+mPosX);
+            Log.d(TAG, "mPosY: "+mPosY);
 
             updateGeometry();
 
@@ -486,6 +489,8 @@ public class VideoRenderer {
             float zoomFactor = 1.0f - (mZoomPercent / 100.0f);
             int rotAngle = Math.round(360 * (mRotatePercent / 100.0f));
 
+            Log.d(TAG, "newWidth: "+newWidth);
+            Log.d(TAG, "newHeight: "+newHeight);
             mViewerOutput.mRect.setScale(newWidth, newHeight);
             mViewerOutput.mRect.setPosition(mPosX, mPosY);
             mViewerOutput.mRect.setRotation(rotAngle);
@@ -547,17 +552,31 @@ public class VideoRenderer {
 
                 mViewerOutput.mRect.draw(mSourceList.get(i).texProgram, mDisplayProjectionMatrix);
                 mViewerOutput.mRect.setScale(scaleX, scaleY);
+                //Log.d(TAG, "scaleX: "+i+" "+scaleX);
+                //Log.d(TAG, "scaleY: "+i+" "+scaleY);
             }
             mViewerOutput.mWindowSurface.swapBuffers();
 
             if(mVideoEncoder.isRecording()){
                 GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-                for (int i=0; i<mSourceList.size(); i++)
-                {
-                    mVideoEncoder.setTextureId(mSourceList.get(i).textureId);
-                    mVideoEncoder.frameAvailable(mSourceList.get(i).surfaceTexture);
-                }
+
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+                GLES20.glEnable(GLES20.GL_BLEND);
+                GLES20.glDisable(GLES20.GL_DEPTH_TEST);
+                GLES20.glDisable(GLES20.GL_CULL_FACE);
+
+                GLES20.glViewport(0, 0, 640, 360);
+
+//                for (int i=0; i<mSourceList.size(); i++)
+//                {
+//                    mVideoEncoder.setTextureId(mSourceList.get(i).textureId);
+//                    mVideoEncoder.frameAvailable(mSourceList.get(i).surfaceTexture);
+//                }
+
+                Matrix.orthoM(mCodecProjectionMatrix, 0, 0, 640, 0, 360, -1, 1);
+                mVideoEncoder.setDisplayProjectionMatrix(mCodecProjectionMatrix);
+                mVideoEncoder.drawAllSources(mSourceList);
             }
 
             if(mRecordingStatus && !mVideoEncoder.isRecording()){
