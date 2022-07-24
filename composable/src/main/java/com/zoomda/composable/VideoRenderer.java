@@ -177,7 +177,11 @@ public class VideoRenderer {
         }
     }
 
-    public void startRecording(File outputFile){
+    public void startRecording(File outputFile) throws Exception{
+        Log.d(TAG, "file: "+outputFile);
+        if(outputFile == null){
+            throw new RuntimeException("This app has no permission of writing external storage");
+        }
         RenderHandler rh = mRenderThread.getHandler();
         rh.sendStartRecording(outputFile);
     }
@@ -463,8 +467,8 @@ public class VideoRenderer {
             Log.d(TAG, "starting camera preview");
             try {
                 mCamera.setPreviewTexture(mSourceList.get(0).surfaceTexture);
-            } catch (IOException ioe) {
-                throw new RuntimeException(ioe);
+            } catch (Throwable t) {
+                //throw new RuntimeException(ioe);
             }
             try{
                 mCamera.startPreview();
